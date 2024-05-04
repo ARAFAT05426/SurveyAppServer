@@ -25,11 +25,13 @@ const client = new MongoClient(uri, {
 // Connect to MongoDB
 async function connectToMongoDB() {
   try {
-    await client.connect();
+    // await client.connect();
+    const carDoctor = client.db("carDoctor");
+    const services = carDoctor.collection("services");
     console.log("Connected to MongoDB!");
   } finally {
     // Ensure the client will close when finished or errors occur
-    await client.close();
+    // await client.close();
   }
 }
 connectToMongoDB().catch(console.error);
