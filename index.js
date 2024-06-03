@@ -4,6 +4,7 @@ require("dotenv").config();
 const cors = require("cors");
 const cookieParser = require("cookie-parser");
 const jwt = require("jsonwebtoken");
+const stripe = require("stripe")(process.env.STRIPE_SECRET_KEY);
 const app = express();
 const port = process.env.PORT || 5426;
 
@@ -17,6 +18,7 @@ app.use(
 );
 app.use(express.json());
 app.use(cookieParser());
+
 // MongoDB URI
 const uri = `mongodb+srv://${process.env.DB_USER}:${process.env.DB_PASS}@cluster0.b5qg8rw.mongodb.net`;
 
@@ -29,14 +31,27 @@ const client = new MongoClient(uri, {
   },
 });
 
+// JWT verification middleware
+const verifyToken = (req, res, next) => {
+  const token = req.headers.authorization?.split(" ")[1];
+  if (!token) return res.status(401).send({ message: "Unauthorized" });
+
+  jwt.verify(token, process.env.TOKEN_SECRET, (err, decoded) => {
+    if (err) return res.status(403).send({ message: "Forbidden" });
+    req.user = decoded;
+    next();
+  });
+};
+
 // Connect to MongoDB
 async function connectToMongoDB() {
   try {
-    // await client.connect();
+    await client.connect();
     const KwikPolls = client.db("KwikPolls");
     const users = KwikPolls.collection("users");
     const surveys = KwikPolls.collection("surveys");
     console.log("Connected to MongoDB!");
+
     app.post("/jwt", async (req, res) => {
       const user = req.body;
       const token = jwt.sign(user, process.env.TOKEN_SECRET, {
@@ -44,34 +59,49 @@ async function connectToMongoDB() {
       });
       res.send({ success: true, token });
     });
+
     app.put("/user", async (req, res) => {
       const user = req.body;
-
       const query = { email: user?.email };
-      // check if user already exists in db
       const isExist = await users.findOne(query);
       if (isExist) {
         if (user.status === "Requested") {
-          // if existing user try to change his role
           const result = await users.updateOne(query, {
             $set: { status: user?.status },
           });
           return res.send(result);
         } else {
-          // if existing user login again
           return res.send(isExist);
         }
       }
       const options = { upsert: true };
       const updateDoc = {
-        $set: {
-          ...user,
-          timestamp: Date.now(),
-        },
+        $set: { ...user, timestamp: Date.now() },
       };
       const result = await users.updateOne(query, updateDoc, options);
       res.send(result);
     });
+
+    // PAYMENT INTENT
+    app.post("/create-payment-intent", verifyToken, async (req, res) => {
+      const { price } = req.body;
+      const priceInCent = Math.round(parseFloat(price) * 100);
+      if (!price || priceInCent < 1)
+        return res.status(400).send({ error: "Invalid price" });
+
+      try {
+        const paymentIntent = await stripe.paymentIntents.create({
+          amount: priceInCent,
+          currency: "usd",
+          automatic_payment_methods: { enabled: true },
+        });
+        res.send({ clientSecret: paymentIntent.client_secret });
+      } catch (error) {
+        console.error("Error creating payment intent:", error);
+        res.status(500).send({ error: "Internal Server Error" });
+      }
+    });
+
     // SURVEY
     app.post("/survey", async (req, res) => {
       const data = req.body;
@@ -81,36 +111,61 @@ async function connectToMongoDB() {
 
     app.get("/survey/:id", async (req, res) => {
       const surveyId = req.params.id;
-      console.log(surveyId);
       const result = await surveys.findOne({ _id: new ObjectId(surveyId) });
       res.send(result);
     });
+
     app.put("/survey/:id", async (req, res) => {
       const surveyId = req.params.id;
       const updatedData = req.body;
-      const result = await surveys.updateOne({ _id: new ObjectId(surveyId) }, { $set: updatedData });
+      const result = await surveys.updateOne(
+        { _id: new ObjectId(surveyId) },
+        { $set: updatedData }
+      );
       res.send(result);
     });
+
     app.delete("/survey/:id", async (req, res) => {
       const surveyId = req.params.id;
-      const result = await surveys.deleteOne({ _id: new ObjectId(surveyId)});
+      const result = await surveys.deleteOne({ _id: new ObjectId(surveyId) });
       res.send(result);
     });
+
     app.get("/survey", async (req, res) => {
-      const query = req.query.limit;
       const result = await surveys.find().toArray();
       res.send(result);
     });
-  } finally {
-    // Ensure the client will close when finished or errors occur
-    // await client.close();
+    // USERS
+    app.get("/user", async (req, res) => {
+      const result = await users.find().toArray();
+      res.send(result);
+    });
+    app.get("/user/:email", async (req, res) => {
+      const email = req.params.email;
+      const result = await users.findOne({ email });
+      res.send(result);
+    });
+    //update a user role
+    app.patch("/users/update/:email", async (req, res) => {
+      const email = req.params.email;
+      const user = req.body;
+      const query = { email };
+      const updateDoc = {
+        $set: { ...user, timestamp: Date.now() },
+      };
+      const result = await users.updateOne(query, updateDoc);
+      res.send(result);
+    });
+  } catch (error) {
+    console.error("Error connecting to MongoDB:", error);
   }
 }
+
 connectToMongoDB().catch(console.error);
 
 // Routes
 app.get("/", (req, res) => {
-  res.send("Hello KwickPoll");
+  res.send("Hello KwikPoll");
 });
 
 // Start server
