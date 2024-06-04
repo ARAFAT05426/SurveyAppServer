@@ -4,6 +4,7 @@ require("dotenv").config();
 const cors = require("cors");
 const cookieParser = require("cookie-parser");
 const jwt = require("jsonwebtoken");
+const verifyToken = require("./verify");
 const stripe = require("stripe")(process.env.STRIPE_SECRET_KEY);
 const app = express();
 const port = process.env.PORT || 5426;
@@ -31,18 +32,6 @@ const client = new MongoClient(uri, {
   },
 });
 
-// JWT verification middleware
-const verifyToken = (req, res, next) => {
-  const token = req.headers.authorization?.split(" ")[1];
-  if (!token) return res.status(401).send({ message: "Unauthorized" });
-
-  jwt.verify(token, process.env.TOKEN_SECRET, (err, decoded) => {
-    if (err) return res.status(403).send({ message: "Forbidden" });
-    req.user = decoded;
-    next();
-  });
-};
-
 // Connect to MongoDB
 async function connectToMongoDB() {
   try {
@@ -59,7 +48,18 @@ async function connectToMongoDB() {
       });
       res.send({ success: true, token });
     });
+    // Verify Surveyor middleware
+    const verifySurveyor = async (req, res, next) => {
+      const user = req.user;
+      const query = { email: user?.email };
+      const result = await user.findOne(query);
+      console.log(result?.role);
+      if (!result || result?.role !== "surveyor") {
+        return res.status(401).send({ message: "unauthorized access!!" });
+      }
 
+      next();
+    };
     app.put("/user", async (req, res) => {
       const user = req.body;
       const query = { email: user?.email };
@@ -124,6 +124,29 @@ async function connectToMongoDB() {
       );
       res.send(result);
     });
+    app.patch("/survey/:id", async (req, res) => {
+      const surveyId = req.params.id;
+      const { questions, voter } = req.body;
+      console.log(voter);
+      const questionUpdate = await questions.map(
+        async ({ question, selectedOption }) => {return surveys.updateOne(
+            {
+              _id: new ObjectId(surveyId),
+              "questions.question": question,
+              "questions.options.option": selectedOption,
+            },
+            { $inc: { "questions.$.options.$[opt].votecount": 1 } },
+            { arrayFilters: [{ "opt.option": selectedOption }] }
+          );
+        }
+      );
+      const addVoter = await surveys.updateOne(
+        { _id: new ObjectId(surveyId) },
+        { $push: { voters: { email: voter, timestamp: Date.now() } } }
+      );
+      const result = { questionUpdate, addVoter };
+      res.send(result);
+    });
 
     app.delete("/survey/:id", async (req, res) => {
       const surveyId = req.params.id;
@@ -136,7 +159,7 @@ async function connectToMongoDB() {
       res.send(result);
     });
     // USERS
-    app.get("/user", async (req, res) => {
+    app.get("/user", verifyToken, async (req, res) => {
       const result = await users.find().toArray();
       res.send(result);
     });
