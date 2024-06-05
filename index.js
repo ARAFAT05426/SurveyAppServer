@@ -60,36 +60,12 @@ async function connectToMongoDB() {
 
       next();
     };
-    app.put("/user", async (req, res) => {
-      const user = req.body;
-      const query = { email: user?.email };
-      const isExist = await users.findOne(query);
-      if (isExist) {
-        if (user.status === "Requested") {
-          const result = await users.updateOne(query, {
-            $set: { status: user?.status },
-          });
-          return res.send(result);
-        } else {
-          return res.send(isExist);
-        }
-      }
-      const options = { upsert: true };
-      const updateDoc = {
-        $set: { ...user, timestamp: Date.now() },
-      };
-      const result = await users.updateOne(query, updateDoc, options);
-      res.send(result);
-    });
 
     // PAYMENT INTENT
     app.post("/create-payment-intent", verifyToken, async (req, res) => {
-      const { price } = req.body;
-      const priceInCent = Math.round(parseFloat(price) * 100);
-      if (!price || priceInCent < 1)
-        return res.status(400).send({ error: "Invalid price" });
-
       try {
+        const { price } = req.body;
+        const priceInCent = Math.round(parseFloat(price) * 100);
         const paymentIntent = await stripe.paymentIntents.create({
           amount: priceInCent,
           currency: "usd",
@@ -101,6 +77,7 @@ async function connectToMongoDB() {
         res.status(500).send({ error: "Internal Server Error" });
       }
     });
+    
 
     // SURVEY
     app.post("/survey", async (req, res) => {
@@ -124,12 +101,12 @@ async function connectToMongoDB() {
       );
       res.send(result);
     });
-    app.patch("/survey/:id", async (req, res) => {
+    app.patch("/survey/vote/:id", async (req, res) => {
       const surveyId = req.params.id;
       const { questions, voter } = req.body;
-      console.log(voter);
       const questionUpdate = await questions.map(
-        async ({ question, selectedOption }) => {return surveys.updateOne(
+        async ({ question, selectedOption }) => {
+          return surveys.updateOne(
             {
               _id: new ObjectId(surveyId),
               "questions.question": question,
@@ -148,6 +125,14 @@ async function connectToMongoDB() {
       res.send(result);
     });
 
+    app.patch("/survey/comment/:id", async (req, res) => {
+      const query = { _id: new ObjectId(req.params.id) };
+      const comment = req.body;
+      const updatedDoc = { $push: { comments: comment } };
+      const result = await surveys.updateOne(query, updatedDoc);
+      res.send(result);
+    });
+
     app.delete("/survey/:id", async (req, res) => {
       const surveyId = req.params.id;
       const result = await surveys.deleteOne({ _id: new ObjectId(surveyId) });
@@ -158,6 +143,11 @@ async function connectToMongoDB() {
       const result = await surveys.find().toArray();
       res.send(result);
     });
+
+    app.get("/survey/mysurvey/:email", async (req, res) => {
+      const email = req.params.email;
+      console.log(email);
+    });
     // USERS
     app.get("/user", verifyToken, async (req, res) => {
       const result = await users.find().toArray();
@@ -166,6 +156,27 @@ async function connectToMongoDB() {
     app.get("/user/:email", async (req, res) => {
       const email = req.params.email;
       const result = await users.findOne({ email });
+      res.send(result);
+    });
+    app.put("/user", async (req, res) => {
+      const user = req.body;
+      const query = { email: user?.email };
+      const isExist = await users.findOne(query);
+      if (isExist) {
+        if (user.status === "Requested") {
+          const result = await users.updateOne(query, {
+            $set: { status: user?.status },
+          });
+          return res.send(result);
+        } else {
+          return res.send(isExist);
+        }
+      }
+      const options = { upsert: true };
+      const updateDoc = {
+        $set: { ...user, timestamp: Date.now() },
+      };
+      const result = await users.updateOne(query, updateDoc, options);
       res.send(result);
     });
     //update a user role
