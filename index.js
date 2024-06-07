@@ -49,35 +49,36 @@ async function connectToMongoDB() {
       res.send({ success: true, token });
     });
     // Verify Surveyor middleware
+    const verifyAdmin = async (req, res, next) => {
+      const user = req.user;
+      const query = { email: user?.email };
+      const result = await users.findOne(query);
+      if (!result || result?.role !== "admin") {
+        return res.status(401).send({ message: "unauthorized access!!" });
+      }
+      next();
+    };
     const verifySurveyor = async (req, res, next) => {
       const user = req.user;
       const query = { email: user?.email };
-      const result = await user.findOne(query);
-      console.log(result?.role);
+      const result = await users.findOne(query);
       if (!result || result?.role !== "surveyor") {
         return res.status(401).send({ message: "unauthorized access!!" });
       }
-
       next();
     };
 
     // PAYMENT INTENT
     app.post("/create-payment-intent", verifyToken, async (req, res) => {
-      try {
-        const { price } = req.body;
-        const priceInCent = Math.round(parseFloat(price) * 100);
-        const paymentIntent = await stripe.paymentIntents.create({
-          amount: priceInCent,
-          currency: "usd",
-          automatic_payment_methods: { enabled: true },
-        });
-        res.send({ clientSecret: paymentIntent.client_secret });
-      } catch (error) {
-        console.error("Error creating payment intent:", error);
-        res.status(500).send({ error: "Internal Server Error" });
-      }
+      const { price } = req.body;
+      const priceInCent = Math.round(parseFloat(price) * 100);
+      const paymentIntent = await stripe.paymentIntents.create({
+        amount: priceInCent,
+        currency: "usd",
+        automatic_payment_methods: { enabled: true },
+      });
+      res.send({ clientSecret: paymentIntent.client_secret });
     });
-    
 
     // SURVEY
     app.post("/survey", async (req, res) => {
@@ -103,7 +104,7 @@ async function connectToMongoDB() {
     });
     app.patch("/survey/vote/:id", async (req, res) => {
       const surveyId = req.params.id;
-      const { questions, voter } = req.body;
+      const { questions, voter, voterEmail } = req.body;
       const questionUpdate = await questions.map(
         async ({ question, selectedOption }) => {
           return surveys.updateOne(
@@ -119,7 +120,7 @@ async function connectToMongoDB() {
       );
       const addVoter = await surveys.updateOne(
         { _id: new ObjectId(surveyId) },
-        { $push: { voters: { email: voter, timestamp: Date.now() } } }
+        { $push: { voters: { name: voter, email: voterEmail, timestamp: Date.now() } } }
       );
       const result = { questionUpdate, addVoter };
       res.send(result);
@@ -143,13 +144,32 @@ async function connectToMongoDB() {
       const result = await surveys.find().toArray();
       res.send(result);
     });
+    app.get("/survey/voters/:id", async (req, res) => {
+      try {
+          const id = req.params.id;
+          const query = { _id: new ObjectId(id) };
+          
+          // Fetch survey data including title and voters
+          const survey = await surveys.findOne(query, { projection: { title: 1, voters: 1, _id: 0 } });    
+          
+          if (!survey) {
+              return res.status(404).json({ error: "Survey not found" });
+          }
+  
+          res.json(survey);
+      } catch (error) {
+          console.error("Error fetching survey:", error);
+          res.status(500).json({ error: "Internal server error" });
+      }
+  });
+  
 
     app.get("/survey/mysurvey/:email", async (req, res) => {
       const email = req.params.email;
       console.log(email);
     });
     // USERS
-    app.get("/user", verifyToken, async (req, res) => {
+    app.get("/user", verifyToken, verifyAdmin, async (req, res) => {
       const result = await users.find().toArray();
       res.send(result);
     });
@@ -161,18 +181,12 @@ async function connectToMongoDB() {
     app.put("/user", async (req, res) => {
       const user = req.body;
       const query = { email: user?.email };
+      const options = { upsert: true };
       const isExist = await users.findOne(query);
       if (isExist) {
-        if (user.status === "Requested") {
-          const result = await users.updateOne(query, {
-            $set: { status: user?.status },
-          });
-          return res.send(result);
-        } else {
-          return res.send(isExist);
-        }
+        return res.send(isExist);
       }
-      const options = { upsert: true };
+      console.log(user);
       const updateDoc = {
         $set: { ...user, timestamp: Date.now() },
       };
@@ -182,10 +196,10 @@ async function connectToMongoDB() {
     //update a user role
     app.patch("/users/update/:email", async (req, res) => {
       const email = req.params.email;
-      const user = req.body;
+      const { role, payment } = req.body;
       const query = { email };
       const updateDoc = {
-        $set: { ...user, timestamp: Date.now() },
+        $set: { role: role, payment: payment, timestamp: Date.now() },
       };
       const result = await users.updateOne(query, updateDoc);
       res.send(result);
