@@ -120,7 +120,11 @@ async function connectToMongoDB() {
       );
       const addVoter = await surveys.updateOne(
         { _id: new ObjectId(surveyId) },
-        { $push: { voters: { name: voter, email: voterEmail, timestamp: Date.now() } } }
+        {
+          $push: {
+            voters: { name: voter, email: voterEmail, timestamp: Date.now() },
+          },
+        }
       );
       const result = { questionUpdate, addVoter };
       res.send(result);
@@ -141,28 +145,19 @@ async function connectToMongoDB() {
     });
 
     app.get("/survey", async (req, res) => {
-      const result = await surveys.find().toArray();
+      const all = req.query.all;
+      const published = req.query.published;
+      const result = await surveys.find({status: "publish"}).toArray();
       res.send(result);
     });
     app.get("/survey/voters/:id", async (req, res) => {
-      try {
-          const id = req.params.id;
-          const query = { _id: new ObjectId(id) };
-          
-          // Fetch survey data including title and voters
-          const survey = await surveys.findOne(query, { projection: { title: 1, voters: 1, _id: 0 } });    
-          
-          if (!survey) {
-              return res.status(404).json({ error: "Survey not found" });
-          }
-  
-          res.json(survey);
-      } catch (error) {
-          console.error("Error fetching survey:", error);
-          res.status(500).json({ error: "Internal server error" });
-      }
-  });
-  
+      const id = req.params.id;
+      const query = { _id: new ObjectId(id) };
+      const survey = await surveys.findOne(query, {
+        projection: { title: 1, voters: 1, _id: 0 },
+      });
+      res.send(survey);
+    });
 
     app.get("/survey/mysurvey/:email", async (req, res) => {
       const email = req.params.email;
