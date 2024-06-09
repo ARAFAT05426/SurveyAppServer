@@ -129,7 +129,6 @@ async function connectToMongoDB() {
       const result = { questionUpdate, addVoter };
       res.send(result);
     });
-
     app.patch("/survey/comment/:id", async (req, res) => {
       const query = { _id: new ObjectId(req.params.id) };
       const comment = req.body;
@@ -137,7 +136,6 @@ async function connectToMongoDB() {
       const result = await surveys.updateOne(query, updatedDoc);
       res.send(result);
     });
-
     app.delete("/survey/:id", async (req, res) => {
       const surveyId = req.params.id;
       const result = await surveys.deleteOne({ _id: new ObjectId(surveyId) });
@@ -179,19 +177,18 @@ async function connectToMongoDB() {
       });
       res.send(survey);
     });
-
+    app.get("/survey/comments/:email", async(req, res) =>{
+      const email = req.params.email;
+      const result = await surveys.find()
+    })
     app.get("/survey/mysurvey/:email", async (req, res) => {
       const email = req.params.email;
-      console.log(email);
+      const result = await surveys.find({ "host.email": email }).toArray();
+      res.send(result);
     });
     // USERS
     app.get("/user", verifyToken, verifyAdmin, async (req, res) => {
       const result = await users.find().toArray();
-      res.send(result);
-    });
-    app.get("/userstat/:email", async (req, res) => {
-      const email = req.params.email;
-      const result = await users.findOne({ email });
       res.send(result);
     });
     app.get("/user/:email", async (req, res) => {
@@ -250,9 +247,36 @@ async function connectToMongoDB() {
         payments: paymentDetails,
       });
     });
-    app.get("surveyStat", async(req, res) =>{
-      
-    })
+    app.get("/surveyStat/:email", async (req, res) => {
+      try {
+        const email = req.params.email;
+
+        // Find surveys added by the user with the specified email
+        const surveyAdded = await surveys.countDocuments({
+          "host.email": email,
+        });
+
+        // Find account details of the user with the specified email
+        const accountDetails = await users.findOne({ email });
+
+        // Return the survey statistics and account details
+        res.json({ surveyAdded, accountDetails });
+      } catch (error) {
+        console.error("Error fetching survey statistics:", error);
+        res.status(500).json({ error: "Internal server error" });
+      }
+    });
+    app.get("/userStat/:email", async (req, res) => {
+      const email = req.params.email;
+      const surveyData = await surveys.find().toArray();
+      const voted = surveyData.reduce((total, survey) => {
+        return (
+          total + survey.voters.filter((voter) => voter.email === email).length
+        );
+      }, 0);
+      const accountDetails = await users.findOne({ email });
+      res.send({ voted, accountDetails });
+    });
     //update a user role
     app.patch("/users/update/:email", async (req, res) => {
       const email = req.params.email;
