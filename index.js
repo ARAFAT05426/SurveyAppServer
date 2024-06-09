@@ -145,9 +145,30 @@ async function connectToMongoDB() {
     });
 
     app.get("/survey", async (req, res) => {
-      const all = req.query.all;
-      const published = req.query.published;
-      const result = await surveys.find({status: "publish"}).toArray();
+      const { published, popular, latest } = req.query;
+
+      let query = {};
+      let sort = {};
+      let limit = 0;
+
+      if (published === "true") {
+        query.status = "publish";
+      } else if (popular === "true") {
+        query.status = "publish";
+        sort = { voters: -1 };
+        limit = 8;
+      } else if (latest === "true") {
+        query.status = "publish";
+        sort = { timestamp: -1 };
+        limit = 8;
+      }
+
+      const result = await surveys
+        .find(query)
+        .sort(sort)
+        .limit(limit)
+        .toArray();
+
       res.send(result);
     });
     app.get("/survey/voters/:id", async (req, res) => {
@@ -166,6 +187,11 @@ async function connectToMongoDB() {
     // USERS
     app.get("/user", verifyToken, verifyAdmin, async (req, res) => {
       const result = await users.find().toArray();
+      res.send(result);
+    });
+    app.get("/userstat/:email", async (req, res) => {
+      const email = req.params.email;
+      const result = await users.findOne({ email });
       res.send(result);
     });
     app.get("/user/:email", async (req, res) => {
@@ -188,6 +214,45 @@ async function connectToMongoDB() {
       const result = await users.updateOne(query, updateDoc, options);
       res.send(result);
     });
+    app.get("/adminStat", async (req, res) => {
+      const totalSurveys = await surveys.countDocuments();
+      const publishedSurveys = await surveys.countDocuments({
+        status: "publish",
+      });
+      const unpublishedSurveys = await surveys.countDocuments({
+        status: "unpublish",
+      });
+
+      const totalUsers = await users.countDocuments();
+      const surveyors = await users.countDocuments({ role: "surveyor" });
+      const proUsers = await users.countDocuments({ role: "prouser" });
+
+      const payments = await users
+        .find({ "payment.amount": { $exists: true } })
+        .toArray();
+      const paymentDetails = payments.map((doc) => ({
+        amount: parseFloat(doc.payment.amount),
+        timestamp: parseFloat(doc.payment.time),
+      }));
+
+      const totalEarnings = paymentDetails.reduce(
+        (total, payment) => total + payment.amount,
+        0
+      );
+      res.send({
+        totalSurveys,
+        publishedSurveys,
+        unpublishedSurveys,
+        totalUsers,
+        surveyors,
+        proUsers,
+        totalEarnings,
+        payments: paymentDetails,
+      });
+    });
+    app.get("surveyStat", async(req, res) =>{
+      
+    })
     //update a user role
     app.patch("/users/update/:email", async (req, res) => {
       const email = req.params.email;
