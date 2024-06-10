@@ -12,7 +12,7 @@ const port = process.env.PORT || 5426;
 // Middleware
 app.use(
   cors({
-    origin: ["http://localhost:5173"],
+    origin: ["http://localhost:5173", "https://assignment-12-3b03a.web.app"],
     credentials: true,
     optionsSuccessStatus: 200,
   })
@@ -67,6 +67,24 @@ async function connectToMongoDB() {
       }
       next();
     };
+    const verifyPro = async (req, res, next) => {
+      const user = req.user;
+      const query = { email: user?.email };
+      const result = await users.findOne(query);
+      if (!result || result?.role !== "prouser") {
+        return res.status(401).send({ message: "unauthorized access!!" });
+      }
+      next();
+    };
+    const verifyUser = async (req, res, next) => {
+      const user = req.user;
+      const query = { email: user?.email };
+      const result = await users.findOne(query);
+      if (!result || result?.role !== "user") {
+        return res.status(401).send({ message: "unauthorized access!!" });
+      }
+      next();
+    };
 
     // PAYMENT INTENT
     app.post("/create-payment-intent", verifyToken, async (req, res) => {
@@ -81,7 +99,7 @@ async function connectToMongoDB() {
     });
 
     // SURVEY
-    app.post("/survey", async (req, res) => {
+    app.post("/survey", verifyToken, verifySurveyor, async (req, res) => {
       const data = req.body;
       const result = await surveys.insertOne(data);
       res.send(result);
@@ -93,7 +111,7 @@ async function connectToMongoDB() {
       res.send(result);
     });
 
-    app.put("/survey/:id", async (req, res) => {
+    app.put("/survey/:id", verifyToken, async (req, res) => {
       const surveyId = req.params.id;
       const updatedData = req.body;
       const result = await surveys.updateOne(
@@ -129,47 +147,49 @@ async function connectToMongoDB() {
       const result = { questionUpdate, addVoter };
       res.send(result);
     });
-    app.patch("/survey/comment/:id", async (req, res) => {
+    app.patch("/survey/comment/:id", verifyToken, async (req, res) => {
       const query = { _id: new ObjectId(req.params.id) };
       const comment = req.body;
       const updatedDoc = { $push: { comments: comment } };
       const result = await surveys.updateOne(query, updatedDoc);
       res.send(result);
     });
+    app.patch("/survey/report/:id", async (req, res) => {
+      const query = { _id: new ObjectId(req.params.id) };
+      const report  = req.body;
+      const updatedDoc = { $push: { reports: report } };
+      const result = await surveys.updateOne(query, updatedDoc);
+      res.send(result);
+    });
+    
     app.delete("/survey/:id", async (req, res) => {
       const surveyId = req.params.id;
       const result = await surveys.deleteOne({ _id: new ObjectId(surveyId) });
       res.send(result);
     });
-
     app.get("/survey", async (req, res) => {
-      const { published, popular, latest } = req.query;
-
+      const { published, latest } = req.query;
       let query = {};
       let sort = {};
       let limit = 0;
-
+    
       if (published === "true") {
         query.status = "publish";
-      } else if (popular === "true") {
-        query.status = "publish";
-        sort = { voters: -1 };
-        limit = 8;
       } else if (latest === "true") {
         query.status = "publish";
-        sort = { timestamp: -1 };
+        sort = { "deadline.from": -1 };
         limit = 8;
       }
-
+    
       const result = await surveys
         .find(query)
         .sort(sort)
         .limit(limit)
         .toArray();
-
+    
       res.send(result);
-    });
-    app.get("/survey/voters/:id", async (req, res) => {
+    });    
+    app.get("/survey/voters/:id",verifyToken, verifySurveyor, async (req, res) => {
       const id = req.params.id;
       const query = { _id: new ObjectId(id) };
       const survey = await surveys.findOne(query, {
@@ -177,11 +197,11 @@ async function connectToMongoDB() {
       });
       res.send(survey);
     });
-    app.get("/survey/comments/:email", async(req, res) =>{
+    app.get("/survey/comments/:email", verifyToken, verifyPro, async(req, res) =>{
       const email = req.params.email;
       const result = await surveys.find()
     })
-    app.get("/survey/mysurvey/:email", async (req, res) => {
+    app.get("/survey/mysurvey/:email", verifyToken, verifySurveyor, async (req, res) => {
       const email = req.params.email;
       const result = await surveys.find({ "host.email": email }).toArray();
       res.send(result);
@@ -191,7 +211,7 @@ async function connectToMongoDB() {
       const result = await users.find().toArray();
       res.send(result);
     });
-    app.get("/user/:email", async (req, res) => {
+    app.get("/user/:email", verifyToken, async (req, res) => {
       const email = req.params.email;
       const result = await users.findOne({ email });
       res.send(result);
@@ -211,7 +231,7 @@ async function connectToMongoDB() {
       const result = await users.updateOne(query, updateDoc, options);
       res.send(result);
     });
-    app.get("/adminStat", async (req, res) => {
+    app.get("/adminStat", verifyToken, verifyAdmin, async (req, res) => {
       const totalSurveys = await surveys.countDocuments();
       const publishedSurveys = await surveys.countDocuments({
         status: "publish",
@@ -247,7 +267,7 @@ async function connectToMongoDB() {
         payments: paymentDetails,
       });
     });
-    app.get("/surveyStat/:email", async (req, res) => {
+    app.get("/surveyStat/:email", verifyToken, verifySurveyor, async (req, res) => {
       try {
         const email = req.params.email;
 
@@ -266,7 +286,23 @@ async function connectToMongoDB() {
         res.status(500).json({ error: "Internal server error" });
       }
     });
-    app.get("/userStat/:email", async (req, res) => {
+    app.get("/proStat/:email", verifyToken, verifyPro,async (req, res) => {
+      const email = req.params.email;
+      const surveyData = await surveys.find().toArray();
+      const voted = surveyData.reduce((total, survey) => {
+        return (
+          total + survey.voters.filter((voter) => voter.email === email).length
+        );
+      }, 0);
+      const commented = surveyData.reduce((total, survey) => {
+        return (
+          total + survey.comments.filter((comment) => comment.user === email).length
+        );
+      }, 0);
+      const accountDetails = await users.findOne({ email });
+      res.send({ voted, accountDetails, commented });
+    });
+    app.get("/userStat/:email",verifyToken, verifyUser, async (req, res) => {
       const email = req.params.email;
       const surveyData = await surveys.find().toArray();
       const voted = surveyData.reduce((total, survey) => {
