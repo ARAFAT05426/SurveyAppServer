@@ -168,7 +168,7 @@ async function connectToMongoDB() {
       res.send(result);
     });
     app.get("/survey", async (req, res) => {
-      const { published, latest } = req.query;
+      const { published, popular, latest } = req.query;
       let query = {};
       let sort = {};
       let limit = 0;
@@ -177,8 +177,8 @@ async function connectToMongoDB() {
         query.status = "publish";
       } else if (latest === "true") {
         query.status = "publish";
-        sort = { "deadline.from": -1 };
-        limit = 8;
+        sort = { "timestamp": -1 }; // Sort by timestamp in descending order
+        limit = 8; // Adjust the limit to fetch 10 latest surveys
       }
     
       const result = await surveys
@@ -188,7 +188,8 @@ async function connectToMongoDB() {
         .toArray();
     
       res.send(result);
-    });    
+    });
+       
     app.get("/survey/voters/:id",verifyToken, verifySurveyor, async (req, res) => {
       const id = req.params.id;
       const query = { _id: new ObjectId(id) };
