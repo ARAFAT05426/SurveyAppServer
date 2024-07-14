@@ -35,7 +35,7 @@ const client = new MongoClient(uri, {
 // Connect to MongoDB
 async function connectToMongoDB() {
   try {
-    await client.connect();
+    client.connect();
     const KwikPolls = client.db("KwikPolls");
     const users = KwikPolls.collection("users");
     const surveys = KwikPolls.collection("surveys");
@@ -168,7 +168,7 @@ async function connectToMongoDB() {
       res.send(result);
     });
     app.get("/survey", async (req, res) => {
-      const { published, popular, latest } = req.query;
+      const { published, latest } = req.query;
       let query = {};
       let sort = {};
       let limit = 0;
@@ -177,8 +177,8 @@ async function connectToMongoDB() {
         query.status = "publish";
       } else if (latest === "true") {
         query.status = "publish";
-        sort = { "timestamp": -1 }; // Sort by timestamp in descending order
-        limit = 8; // Adjust the limit to fetch 10 latest surveys
+        sort = { "timestamp": -1 };
+        limit = 8;
       }
     
       const result = await surveys
@@ -186,7 +186,6 @@ async function connectToMongoDB() {
         .sort(sort)
         .limit(limit)
         .toArray();
-    
       res.send(result);
     });
        
